@@ -140,8 +140,16 @@ When a super-skill rolls up a non-citation finding from a sub-skill (an `id` tha
 - `references: []` — required. An agent finding has no knowledge-file citation by definition; if a citation existed, the finding would be a knowledge-backed finding instead.
 - `id` — a skill-defined slug, prefixed with `agent:` (mirroring the `<from-sub-skill>:` rule). For example, `agent:obsolete-find-signature`.
 - `confidence` — capped at `medium`. Without a knowledge-file citation there is no authoritative basis for `high` confidence.
+- `severity` — capped at `minor`. Agent findings are advisory and non-gating: without a curated rule behind them they MUST NOT carry `major` or `blocker` weight, which the severity taxonomy reserves for gating defects. A genuinely severe issue the agent is confident about almost always matches an existing knowledge file (upgrading it to a knowledge-backed finding) or warrants authoring a new one — not a high-severity agent finding. When the underlying impact would otherwise be `major` or `blocker`, keep the emitted `severity` at `minor` but say so plainly in the `message`, and flag that the concern should be promoted to a knowledge-backed rule before it can gate.
 - `message` — non-empty and self-contained. It MUST describe the issue and a concrete recommendation, since a consumer rendering the finding has no knowledge-file footer to fall back on.
 - `from-sub-skill` — set by super-skills only. The literal string `"agent"` when the super-skill itself produced the finding from its own cross-cutting reasoning; or the producing leaf's `skill.id` when the super-skill is rolling up a leaf's agent finding. Absent on findings emitted directly by a leaf (the leaf's own report carries the finding under its `skill.id` already).
+
+**Precision bar — emit agent findings conservatively.** Agent findings are the lowest-precision output BCQuality produces: there is no curated rule behind them, so a false positive costs reviewer trust with nothing to point back to. Hold them to a deliberately high bar:
+
+- Emit only a **concrete, demonstrable defect with material impact** that a knowledgeable BC reviewer would agree is wrong — not merely different, suboptimal in theory, or not-how-I-would-write-it.
+- **Steelman before emitting.** State the strongest case that the code is correct as written: a deliberate choice, a valid alternative, or behaviour that depends on code outside the diff. If that case is plausible, do not emit.
+- **Never emit** as agent findings: stylistic or formatting preferences (outside a dedicated style skill's own domain); speculative or hypothetical concerns — anything you would phrase with "could", "might", or "consider"; issues that depend on code not visible in the diff; valid alternative approaches; or generic software-engineering advice a competent model already applies without prompting (the same exclusion the knowledge-file admission test enforces).
+- **When in doubt, omit.** Recall is the knowledge files' responsibility; the agent channel exists only for the high-confidence, concrete defect the corpus has not captured yet. A missed low-severity observation is cheaper than a false positive.
 
 Agent findings may be emitted by both leaf sub-skills and super-skills, with different scope boundaries:
 

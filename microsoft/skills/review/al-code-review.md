@@ -82,7 +82,7 @@ For each sub-skill in the worklist, executed one at a time per the discipline ab
 
 Each leaf sub-skill emits both knowledge-backed findings and, per its own contract, agent findings within its own domain. After every sub-skill has produced its sub-result, perform a super-skill self-review pass against the same task input. The goal of this pass is to surface defects the agent recognises on its own that **no single leaf could have surfaced** because they cross domain boundaries — architecture-level issues that touch performance and reliability at once, error-handling gaps that span security and UX, resource-lifecycle patterns that affect both correctness and performance, and similar cross-cutting concerns. BCQuality is an **additive** knowledge layer: it augments the agent's review judgement, it does not replace it.
 
-This pass is mandatory on real-size PRs. An empty agent-findings list at the super-skill level is acceptable only when the diff is small enough that nothing cross-cutting plausibly applies (in practice: PRs of ≤2 files with ≤30 changed lines). For larger diffs, the fact that leaves emitted findings does not exempt the super-skill — the leaves handle within-domain reasoning, the super-skill handles cross-domain reasoning, and a real-size PR with no cross-cutting candidates is rare.
+The self-review *reasoning* is mandatory — you MUST actually perform the cross-cutting analysis on every real-size PR, not skip it. But the pass need not produce any output: emitting **zero** agent findings is a valid, expected outcome whenever no candidate clears the precision bar in `skills/do.md` (*Agent findings*). Do not invent or pad findings to prove the pass ran. Always reason; emit only what survives the bar.
 
 Frame the pass by cross-cutting concerns — architecture, error handling, resource lifecycle — and by the seams between leaf domains. Do not duplicate domain-specific reasoning that belongs in a leaf: a security-only concern is the security leaf's responsibility, not the super-skill's. The super-skill pass adds value where no individual leaf has the right scope.
 
@@ -97,6 +97,7 @@ For every candidate the agent identifies in this pass:
    - `references: []`
    - `id` is a skill-defined slug prefixed with `agent:` (for example, `agent:missing-error-handling-on-http-call`).
    - `confidence` capped at `medium`.
+   - `severity` capped at `minor` — agent findings are advisory and non-gating per `skills/do.md`; never assign `major` or `blocker` to a finding with no knowledge file behind it.
    - `message` is non-empty and self-contained, describing both the issue and a concrete recommendation. A consumer rendering the finding has no knowledge-file footer to fall back on.
    - `suggested-code` MUST be set when the fix is small, local, and mechanical. If a mechanical-looking finding omits it, set `suggested-code-omission-reason` with the reason (for example, the fix spans non-contiguous code or requires choosing a real production value).
 
