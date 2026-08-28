@@ -62,6 +62,7 @@ ISO_ALPHA2 = re.compile(r"^[a-z]{2}$")
 RANGE_SHORTHAND = re.compile(r"^(\d+)\.\.(\d+)?$")
 FENCED_CODE_BLOCK = re.compile(r"^```", re.MULTILINE)
 HEADING_H2 = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
+SAMPLE_REFERENCE = re.compile(r"`([a-z0-9]+(?:-[a-z0-9]+)*\.(?:good|bad)\.[a-z0-9]+)`")
 
 
 # --- Diagnostics ------------------------------------------------------------
@@ -222,6 +223,13 @@ def validate_knowledge(path: Path, parsed: Parsed, report: Report) -> None:
     if "domain" in fm:
         if not isinstance(fm["domain"], str) or not fm["domain"].strip():
             report.error(path, "R04", "domain must be a non-empty string", 1)
+        elif fm["domain"] != path.parent.name:
+            report.error(
+                path,
+                "R27",
+                f"frontmatter domain '{fm['domain']}' must match directory '{path.parent.name}'",
+                1,
+            )
 
     # R05 keywords
     if "keywords" in fm:
@@ -477,7 +485,16 @@ def validate_samples_in_domain(domain_dir: Path, root: Path, report: Report) -> 
     """R14: every non-.md file must match <slug>.<kind>.<ext> with <slug>.md present."""
     if not domain_dir.is_dir():
         return
-    article_slugs = {p.stem for p in domain_dir.glob("*.md")}
+    articles = {p.stem: p for p in domain_dir.glob("*.md")}
+    article_slugs = set(articles)
+    article_texts: dict[str, str] = {}
+    for slug, article in articles.items():
+        try:
+            article_texts[slug] = article.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            # R01 reports this during the article pass.
+            continue
+
     for entry in domain_dir.iterdir():
         if not entry.is_file() or entry.suffix == ".md":
             continue
@@ -491,8 +508,23 @@ def validate_samples_in_domain(domain_dir: Path, root: Path, report: Report) -> 
         kind = m.group("kind")
         if slug not in article_slugs:
             report.error(entry, "R14", f"orphan sample: no matching article '{slug}.md' in {domain_dir.relative_to(root).as_posix()}")
+        elif entry.name not in article_texts.get(slug, ""):
+            report.error(
+                entry,
+                "R28",
+                f"sample is not referenced by its article '{slug}.md'",
+            )
         if kind not in VALID_SAMPLE_KINDS:
             report.warn(entry, "R14", f"non-standard sample kind '{kind}'; standard kinds are {sorted(VALID_SAMPLE_KINDS)}")
+
+    for slug, article in articles.items():
+        for sample_name in SAMPLE_REFERENCE.findall(article_texts.get(slug, "")):
+            if not (domain_dir / sample_name).is_file():
+                report.error(
+                    article,
+                    "R28",
+                    f"referenced sample does not exist: '{sample_name}'",
+                )
 
 
 # --- Orchestration ----------------------------------------------------------
@@ -504,9 +536,48 @@ class SkillRecord:
     skill_id: str | None
 
 
+def validate_sub_skills_registry(path: Path, fm: dict[str, Any], root: Path, report: Report) -> None:
+    """R26: a super-skill's declared `sub-skills` must exactly match the
+    `al-*-review.md` leaf files present in the same directory (set equality,
+    ordering-agnostic). This keeps the registered leaf list the single source
+    of truth and fails CI on a forgotten, stale, or missing registration.
+
+    Only applies to action-skill files declaring a non-empty list-of-str
+    `sub-skills`. Files whose `sub-skills` is malformed are handled by R20.
+    """
+    ss = fm.get("sub-skills")
+    if not is_non_empty_list_of_str(ss):
+        return
+
+    declared = {s.lstrip("./") for s in ss}
+
+    # Sibling leaves on disk, excluding the super-skill file itself.
+    leaves = {
+        p.relative_to(root).as_posix()
+        for p in path.parent.glob("al-*-review.md")
+        if p.resolve() != path.resolve()
+    }
+
+    # Declared entries that are not real sibling leaves on disk (missing/stale).
+    for entry in sorted(declared - leaves):
+        entry_path = root / entry
+        if not entry_path.exists():
+            report.error(path, "R26", f"declared sub-skill does not exist on disk: {entry}", 1)
+        else:
+            report.error(
+                path, "R26",
+                f"sub-skills entry is not a sibling 'al-*-review.md' leaf: {entry}", 1,
+            )
+
+    # Sibling leaves on disk that were never registered ('forgot to wire it up').
+    for leaf in sorted(leaves - declared):
+        report.error(path, "R26", f"leaf not registered in sub-skills: {leaf}", 1)
+
+
 def run(root: Path) -> Report:
     report = Report()
     skill_records: list[SkillRecord] = []
+    action_skill_fms: list[tuple[Path, dict[str, Any]]] = []
 
     # Walk declared top-level folders only; avoid wandering into .git, etc.
     walk_roots = [root / "skills"] + [root / layer for layer in LAYERS]
@@ -533,6 +604,8 @@ def run(root: Path) -> Report:
             validate_knowledge(path, parsed, report)
         elif kind == "action-skill":
             validate_action_skill(path, parsed, report)
+            if parsed.frontmatter:
+                action_skill_fms.append((path, parsed.frontmatter))
             if parsed.frontmatter and isinstance(parsed.frontmatter.get("id"), str):
                 skill_records.append(SkillRecord(path, "action-skill", parsed.frontmatter["id"]))
         elif kind == "meta":
@@ -565,6 +638,10 @@ def run(root: Path) -> Report:
                 for p in paths:
                     others = [q.relative_to(root).as_posix() for q in paths if q != p]
                     report.error(p, "R24", f"skill id '{sid}' ({kind}) is not unique; also defined in: {others}")
+
+    # Fourth pass: R26 sub-skills registry matches leaf files on disk
+    for path, fm in action_skill_fms:
+        validate_sub_skills_registry(path, fm, root, report)
 
     return report
 

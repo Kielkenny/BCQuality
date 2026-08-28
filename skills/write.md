@@ -9,6 +9,25 @@ title: New Knowledge — how to author a knowledge file
 
 Anyone — human or agent — adding a knowledge file to BCQuality follows this guide. READ is the format specification; WRITE is the authoring guide. This file does not restate the schema; consult READ for field-by-field semantics.
 
+## Is this a knowledge file?
+
+Before authoring anything, confirm a knowledge file is the right artifact. BCQuality separates *mechanics* from *facts*:
+
+- **Skills** (`*/skills/**`) hold only finder/applier mechanics — how to discover, filter, worklist, and emit findings. See `skills/do.md`.
+- **Knowledge files** (`*/knowledge/**`) hold every Business-Central-specific fact a skill acts on.
+
+A new BC fact is therefore a knowledge file, never a skill edit. In particular, if you arrived here because a review agent flagged something it should not have (a false positive) or missed something it should have caught, the remedy is a knowledge file — apply the admission test in the [README](../README.md#what-belongs-here): *would a capable LLM get this wrong without the file?* If you find yourself editing a skill to stop it flagging something, stop and write a knowledge file instead.
+
+### Negative knowledge is first-class
+
+A knowledge file does not have to recommend an action. A **negative clarification** — "pattern X is *not* a defect, because BC behaves as Y" — is a first-class knowledge file, authored exactly like a positive rule:
+
+- **Description** states the BC behaviour that makes the pattern legitimate.
+- **Best Practice** tells the reviewer or agent what *not* to flag, and why.
+- **Anti Pattern** describes the false-positive report itself — the mistaken finding to suppress.
+
+For example, `microsoft/knowledge/error-handling/page-boolean-triggers-default-to-true.md` records that the Boolean page record triggers return `true` by default, so a "missing `exit(true)`" report is not a real defect. It reads as ordinary knowledge; its anti-pattern is the incorrect review comment, not the code.
+
 ## Before you start
 
 Read `skills/read.md` first. A file that does not conform to READ will be rejected. WRITE assumes READ is already understood.
@@ -65,6 +84,17 @@ Knowledge files do not contain code. Samples live as **sibling files** next to t
 - **`/community/knowledge/<domain>/`** — shared community patterns. The default layer for contributions from outside the platform team. Content here can be promoted to `/microsoft/` once it proves itself.
 - **`/custom/knowledge/<domain>/`** — partner or customer overrides. Generally does not appear in the BCQuality repository itself; `/custom/` lives in consumer repositories.
 
+### Writing to `/custom/` — fork precondition
+
+The `/custom/` layer is **empty by default** in the upstream `microsoft/BCQuality` repository — it ships as a template (`README.md` plus `.gitkeep` placeholders) and is meant to be populated only inside a **fork or consumer clone** that an organization controls. Custom content is partner- or customer-specific by definition and is never accepted upstream.
+
+Before authoring or scaffolding any file under `/custom/knowledge/` or `/custom/skills/`, an author — human or agent — MUST confirm the working repository is **not** `microsoft/BCQuality`:
+
+- Check the `origin` remote: `git remote get-url origin`. If it points at `github.com/microsoft/BCQuality`, stop — you are in the upstream repo, not a fork.
+- If you are in the upstream repo, do not write the file. Either fork the repository (or clone it into your organization's own repo) and add the custom content there, or — if the guidance is genuinely shareable — author it in `/community/knowledge/` instead.
+
+A pull request that adds `/custom/` content to `microsoft/BCQuality` will be **automatically closed** by the `Guard custom layer` workflow. Validate the fork precondition first so authoring effort is not wasted on a PR that cannot be merged.
+
 ## Pre-PR checklist
 
 Before opening a pull request:
@@ -74,7 +104,10 @@ Before opening a pull request:
 - No fenced code blocks.
 - File is under 100 lines.
 - File covers one concern.
+- Frontmatter `domain` exactly matches the containing domain folder.
 - File is in the correct layer and domain folder.
 - Name is kebab-case and descriptive.
+- Every companion sample is referenced by filename from the article, and every referenced sample exists.
+- Every review-leaf domain has at least one article with both `.good.al` and `.bad.al` companions; the evaluation harness derives positive and clean controls from that convention automatically.
 
 Agents scaffolding new files SHOULD run this checklist programmatically before emitting the file.

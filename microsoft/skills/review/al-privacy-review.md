@@ -38,10 +38,17 @@ Discard files that are not applicable. Retain conditionally applicable files (an
 Narrow the relevant files to the subset that applies to the changes under review. Exclude test codeunits, test libraries, test helper code, files under test/Test/Tests paths, and objects with `Subtype = Test`; test data is synthetic and does not ship to customers. For each relevant file, compute overlap against:
 
 - The changed AL object names and types — especially tables and tableextensions (for `DataClassification` on fields), codeunits that call `Error`, `Session.LogMessage`, or `FeatureTelemetry`, codeunits performing outgoing HTTP requests with customer data, migration codeunits, and objects reading or writing `IsolatedStorage`.
-- The changed procedures and triggers, weighted toward those that call `Error`, `Session.LogMessage`, `StrSubstNo`, `GetLastErrorText`, `FeatureTelemetry.LogUsage`/`LogUptake`/`LogError`, `HttpClient.Post`/`Get`, `IsolatedStorage.Set`/`SetEncrypted`/`Get`, or `PrivacyNotice.GetPrivacyNoticeApprovalState`.
-- Tokens extracted from the diff that relate to privacy (`DataClassification`, `CustomerContent`, `EndUserIdentifiableInformation`, `EndUserPseudonymousIdentifiers`, `SystemMetadata`, `ToBeClassified`, `PrivacyNotice`, `GetLastErrorText`, `TelemetryScope`, `FeatureTelemetry`, `CustomDimensions`, `LogUsage`, `LogUptake`, `LogError`, `HybridSL`, `HybridGP`, `HybridBC`).
+- The changed procedures and triggers, weighted toward those that call `Error`, construct `ErrorInfo`, call `Session.LogMessage`, `StrSubstNo`, `GetLastErrorText`/`GetLastErrorCallStack`, `FeatureTelemetry.LogUsage`/`LogUptake`/`LogError`, `HttpClient.Post`/`Get`, `IsolatedStorage.Set`/`SetEncrypted`/`Get`, or `PrivacyNotice.GetPrivacyNoticeApprovalState`.
+- Tokens extracted from the diff that relate to privacy (`DataClassification`, `CustomerContent`, `EndUserIdentifiableInformation`, `EndUserPseudonymousIdentifiers`, `SystemMetadata`, `ToBeClassified`, `PrivacyNotice`, `ErrorInfo`, `GetLastErrorText`, `GetLastErrorCallStack`, `TelemetryScope`, `FeatureTelemetry`, `CustomDimensions`, `LogUsage`, `LogUptake`, `LogError`, `ErrorText`, `ErrorCallStack`, `alErrorText`, `alErrorCallStack`, `HybridSL`, `HybridGP`, `HybridBC`).
+- Treat `ErrorInfo.Message`, `ErrorInfo.DataClassification`, `ErrorInfo.ErrorType`, and `ErrorInfo.DetailedMessage` as qualified member signals: accept a call or assignment only when symbol resolution proves that its receiver expression or variable has type `ErrorInfo`. Normalize those accesses to `errorinfo-message`, `errorinfo-dataclassification`, `errorinfo-errortype`, and `errorinfo-detailedmessage` retrieval tokens. Bare `Message` or `DataClassification` tokens MUST NOT trigger this article; do not emit the qualified tokens for `Message(...)` dialog calls, table or table-field `DataClassification` properties, or similarly named members on other types. Resolve the receiver's declaration from the containing object when it is outside the changed hunk.
+- Worklist ErrorInfo privacy guidance only from those typed `ErrorInfo` member tokens or from construction of an `ErrorInfo` value. For every `FeatureTelemetry.LogError`, inspect the dedicated error text and call-stack arguments in addition to explicit custom dimensions.
 
-A file enters the candidate worklist when its `keywords` intersect the extracted tokens or its topic (derived from the index entry's `path`, `title`, and `description`) matches a changed object type. Read an article's full file — its `## Best Practice` / `## Anti Pattern` bodies — only after it makes the worklist; candidate selection uses the index alone.
+A file enters the candidate worklist when its `keywords` intersect the extracted tokens or its topic (derived from the index entry's `path`, `title`, and `description`) matches a changed object type. Apply the topic-specific gates above after this overlap check; in particular, bare `Message` and `DataClassification` tokens cannot admit ErrorInfo guidance. Read an article's full file — its `## Best Practice` / `## Anti Pattern` bodies — only after it makes the worklist; candidate selection uses the index alone.
+
+Apply API ownership before fuzzy ranking:
+
+- A `Session.LogMessage` message built with `StrSubstNo` or concatenation from customer, employee, filename, document, or other identifying values belongs to `no-pii-in-telemetry-message-string.md`.
+- `avoid-strsubstno-prebuild-before-error.md` applies only when `StrSubstNo` or concatenation supplies the first argument to `Error(...)`. Never apply it to `Session.LogMessage`, `FeatureTelemetry`, or another telemetry API.
 
 Once the candidate worklist is known, resolve layer-precedence conflicts per READ. Drop lower-precedence files whose normative guidance (`## Best Practice` or `## Anti Pattern`) directly contradicts a higher-precedence candidate, and record each dropped file in `suppressed` with `reason: "layer-precedence"`. Files that would have been candidates but are hidden because their layer is disabled in consumer configuration are recorded with `reason: "configuration"`. Files that never became candidates are NOT recorded in `suppressed`.
 
@@ -53,7 +60,7 @@ For each worklist entry, evaluate the diff against the file's `## Best Practice`
 
 - When the diff contains a clear match for an Anti Pattern, emit a finding with severity `major` or `blocker`, a message summarizing the anti-pattern, `location` pointing to the offending line or range, and a `references` entry pointing to the knowledge file. Use `blocker` only when the knowledge file states the anti-pattern violates a platform-level guarantee (for example, documented telemetry-classification rules or GDPR-adjacent data-handling requirements). When the file does not make such a claim, the ceiling is `major`.
 - When the diff contains code that contradicts a Best Practice without being a full anti-pattern, emit `minor` with the same reference shape.
-- When the skill cannot detect a violation but the file is clearly applicable to the change, emit `info` citing the file. Repository-wide observations MAY omit `location`.
+- Applicability alone is not a finding. Emit `info` only for a concrete, non-actionable observation the article explicitly defines; otherwise emit nothing when no violation is present.
 
 Set `confidence` to:
 
@@ -61,7 +68,7 @@ Set `confidence` to:
 - `medium` when detection relies on heuristics or when any frontmatter dimension was `unknown`.
 - `low` when the finding is an advisory derived only from applicability.
 
-After evaluating each worklist entry, also consider whether the diff exhibits a privacy defect the agent recognises from its general AL knowledge that no knowledge file in the worklist covers. Such candidates are agent findings within this skill's domain — emit them with `references: []`, an `id` slug prefixed with `agent:`, `confidence` capped at `medium`, `severity` capped at `minor` (agent findings are advisory and non-gating), and a `message` that is self-contained (describing both the issue and a concrete recommendation, since there is no knowledge-file footer for the consumer to fall back on). Hold every candidate to the precision bar in `skills/do.md` (*Agent findings*): emit only a concrete, material privacy defect a knowledgeable BC reviewer would agree is wrong — steelman it first and drop anything stylistic, speculative, dependent on code outside the diff, or merely a valid alternative; when in doubt, omit. The scope is strictly privacy; defects outside this domain belong to other leaves and MUST NOT be emitted here. Before emitting, check the worklist for a knowledge file that matches the candidate — if one exists, upgrade the candidate to a knowledge-backed finding instead. See `skills/do.md` for the full contract.
+This leaf emits only knowledge-backed privacy findings. Do NOT emit reference-less `agent:` findings in this domain: online evaluation shows the privacy agent-finding channel yields almost no accepted findings and a high volume of dismissed noise, so a privacy concern that no worklist knowledge file covers is omitted here rather than emitted with `references: []`. When you spot a material privacy defect no article covers, the durable fix is to add a knowledge article in BCQuality (per the online-eval self-improvement loop) so this leaf can cite it — not a one-off reference-less finding. Before treating a candidate as uncovered, check the worklist for a knowledge file that matches it; if one exists, emit it as a knowledge-backed finding. See `skills/do.md` for the full contract.
 
 For every emitted finding, decide whether the fix is mechanical. A fix is mechanical when it is small, local, and unambiguous from the diff context (for example: delete unreachable lines; replace `Count() > 0` with `not IsEmpty()`; move a local `Label` to object scope; add a missing `ToolTip`, `OptionCaption`, or `DataClassification`; replace a string-concatenated `Error` with a Label-backed call; change an over-broad permission token; or add an obvious `else`/guard branch). For mechanical findings, emit `findings[].suggested-code` with the literal replacement for the source lines indicated by `location`. The payload must be a verbatim replacement — no diff markers, no fences, no commentary — that the consumer can render as a one-click suggestion. When a `.good.al` companion exists and the diff context matches the `.bad.al` shape, adapt the `.good.al` replacement into `suggested-code`.
 
@@ -77,7 +84,7 @@ Outcome selection:
 
 ## Output
 
-Output conforms to the DO output contract. A populated example:
+Output conforms to the DO output contract. Every finding this skill emits MUST set `findings[].domain` to `"Privacy"`. A populated example:
 
 ```json
 {
@@ -89,21 +96,21 @@ Output conforms to the DO output contract. A populated example:
   },
   "findings": [
     {
-      "id": "microsoft/knowledge/privacy/strsubstno-prebuild-breaks-error-telemetry-classification.md",
+      "id": "microsoft/knowledge/privacy/data-classification-required-on-pii-fields.md",
       "severity": "major",
-      "message": "Error receives a pre-built Text produced by StrSubstNo with customer name and email as arguments. Per the referenced guidance the platform cannot classify or strip PII from an opaque Text and will export the full message to telemetry.",
+      "message": "The new Customer E-Mail table field has no DataClassification property, leaving personal data unclassified.",
       "location": {
-        "file": "src/Sales/CustomerValidation.Codeunit.al",
+        "file": "src/Sales/Customer.TableExt.al",
         "line": 64,
         "range": { "start-line": 60, "end-line": 64 }
       },
       "references": [
-        { "path": "microsoft/knowledge/privacy/strsubstno-prebuild-breaks-error-telemetry-classification.md" }
+        { "path": "microsoft/knowledge/privacy/data-classification-required-on-pii-fields.md" }
       ],
-      "confidence": "high"
+      "confidence": "high",
+      "domain": "Privacy"
     }
   ],
   "suppressed": []
 }
 ```
-
